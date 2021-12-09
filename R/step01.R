@@ -4,12 +4,15 @@ if (!require(noisemaker)) {
 }
 
 library(noisemaker)
+library(here)
 library(fungible)
 library(tidyverse)
 library(pbmcapply)
 library(tictoc)
 
 # Set variable values -----------------------------------------------------
+
+DATA_DIR <- here("data")
 
 # Number of simulation reps
 reps <- 5
@@ -19,7 +22,7 @@ condition_matrix <- tidyr::expand_grid(
   factors = c(1, 3, 5, 10),
   items_per_factor = c(5, 15),
   factor_cor = c(0, .3, .6),
-  loading = c("weak", "moderate", "strong", "random"),
+  loading = c("weak", "moderate", "strong", "sequential"),
   target_rmsea = c(0.025, 0.065, 0.090)
 ) %>% filter(
   !(factors == 1 & factor_cor != 0)
@@ -40,8 +43,19 @@ method_matrix <- tidyr::expand_grid(
   cfi_weight = c(0,1)
 ) %>% filter(rmsea_weight != 0 | cfi_weight != 0)
 
-# Make a safe noisemaker function
-quiet_noisemaker <- purrr::possibly(noisemaker, otherwise = NA, quiet = TRUE)
+# tryCatch function to wrap noisemaker so that warnings and errors are captured
+myTryCatch <- function(expr) {
+  warn <- err <- NULL
+  value <- withCallingHandlers(
+    tryCatch(expr, error=function(e) {
+      err <<- e
+      NULL
+    }), warning=function(w) {
+      warn <<- w
+      invokeRestart("muffleWarning")
+    })
+  list(value=value, warning=warn, error=err)
+}
 
 # Simulation loop ---------------------------------------------------------
 
@@ -50,9 +64,11 @@ seed_list <- sample(1e7, size = nrow(condition_matrix), replace = FALSE)
 
 tic() # Start timing
 
-results_list <- pbmcapply::pbmclapply(
+results_list <- lapply(
   X = seq_along(condition_matrix$condition_num),
   FUN = function(condition) {
+    
+    cat("\nWorking on condition: ", condition)
     
     set.seed(seed_list[condition])
     
@@ -64,7 +80,7 @@ results_list <- pbmcapply::pbmclapply(
     target_cfi <- condition_matrix$target_cfi[condition]
     
     # Set factor loading range given the loading condition
-    if (loading == "random") {
+    if (loading == "sequential") {
       FacLoadDist <- "sequential"
     } else {
       FacLoadDist <- "fixed"
@@ -74,7 +90,7 @@ results_list <- pbmcapply::pbmclapply(
                            "weak" = 0.4,
                            "moderate" = 0.6,
                            "strong" = 0.8,
-                           "random" = c(0.4, 0.8))
+                           "sequential" = c(0.4, 0.8))
     
     # Generate factor model
     mod <- simFA(Model = list(NFac = factors,
@@ -92,48 +108,55 @@ results_list <- pbmcapply::pbmclapply(
       .f = function(i, mod, target_rmsea) {
         
         # TKL method variations
-        sigma_tkl_rmsea_constraints <- quiet_noisemaker(
-          mod,
-          method = "TKL",
-          target_rmsea = target_rmsea,
-          target_cfi = NULL,
-          tkl_ctrl = list(WmaxLoading = .3,
-                          NWmaxLoading = 2,
-                          max_tries = 100,
-                          maxit = 5000)
+        sigma_tkl_rmsea <- myTryCatch(
+          noisemaker(
+            mod,
+            method = "TKL",
+            target_rmsea = target_rmsea,
+            target_cfi = NULL,
+            tkl_ctrl = list(WmaxLoading = .3,
+                            NWmaxLoading = 2,
+                            max_tries = 100,
+                            maxit = 1000)
+          )
         )
         
-        sigma_tkl_cfi_constraints <- quiet_noisemaker(
-          mod,
-          method = "TKL",
-          target_rmsea = target_rmsea,
-          target_cfi = NULL,
-          tkl_ctrl = list(WmaxLoading = .3,
-                          NWmaxLoading = 2,
-                          max_tries = 100,
-                          maxit = 5000)
+        sigma_tkl_cfi <- myTryCatch(
+          noisemaker(
+            mod,
+            method = "TKL",
+            target_rmsea = target_rmsea,
+            target_cfi = NULL,
+            tkl_ctrl = list(WmaxLoading = .3,
+                            NWmaxLoading = 2,
+                            max_tries = 100,
+                            maxit = 1000)
+          )
         )
         
-        sigma_tkl_rmsea_cfi_constraints <- quiet_noisemaker(
-          mod,
-          method = "TKL",
-          target_rmsea = target_rmsea,
-          target_cfi = target_cfi,
-          tkl_ctrl = list(WmaxLoading = .3,
-                          NWmaxLoading = 2,
-                          max_tries = 100,
-                          maxit = 5000)
+        sigma_tkl_rmsea_cfi <- myTryCatch(
+          noisemaker(
+            mod,
+            method = "TKL",
+            target_rmsea = target_rmsea,
+            target_cfi = target_cfi,
+            tkl_ctrl = list(WmaxLoading = .3,
+                            NWmaxLoading = 2,
+                            max_tries = 100,
+                            maxit = 1000)
+          )
         )
         
         # Other methods
-        sigma_cb  <- quiet_noisemaker(mod, method = "CB", 
-                                target_rmsea = target_rmsea)
-        sigma_wb  <- quiet_noisemaker(mod, method = "WB", 
-                                target_rmsea = target_rmsea, wb_mod = wb_mod)
+        sigma_cb  <- myTryCatch(quiet_noisemaker(mod, method = "CB", 
+                                                 target_rmsea = target_rmsea))
+        sigma_wb  <- myTryCatch(noisemaker(mod, method = "WB", 
+                                           target_rmsea = target_rmsea, 
+                                           wb_mod = wb_mod))
         
-        list(sigma_tkl_rmsea_constraints = sigma_tkl_rmsea_constraints,
-             sigma_tkl_cfi_constraints = sigma_tkl_cfi_constraints,
-             sigma_tkl_rmsea_cfi_constraints = sigma_tkl_rmsea_cfi_constraints,
+        list(sigma_tkl_rmsea = sigma_tkl_rmsea,
+             sigma_tkl_cfi = sigma_tkl_cfi,
+             sigma_tkl_rmsea = sigma_tkl_rmsea_cfi,
              sigma_cb  = sigma_cb,
              sigma_wb  = sigma_wb)
       }, 
@@ -141,8 +164,19 @@ results_list <- pbmcapply::pbmclapply(
       target_rmsea = target_rmsea
     )
     
-    sigma_list
-  }, mc.cores = 1
+    # Save condition results
+    saveRDS(
+      sigma_list, 
+      file = here(
+        "data",
+        paste0("results_", 
+               formatC(condition, width = 3, flag = 0),
+               ".RDS"
+        )
+      )
+    )
+    
+  }
 )
 
 toc() # End timing; how much time elapsed?
