@@ -8,14 +8,13 @@ library(here)
 library(fungible)
 library(tidyverse)
 library(pbmcapply)
-library(tictoc)
 
 # Set variable values -----------------------------------------------------
 
 DATA_DIR <- here("data")
 
 # Number of simulation reps
-reps <- 5
+reps <- 500
 
 # Create a matrix of all of the simulation conditions
 condition_matrix <- tidyr::expand_grid(
@@ -59,16 +58,13 @@ myTryCatch <- function(expr) {
 
 # Simulation loop ---------------------------------------------------------
 
+RNGkind("L'Ecuyer-CMRG")
 set.seed(666)
 seed_list <- sample(1e7, size = nrow(condition_matrix), replace = FALSE)
 
-tic() # Start timing
-
-results_list <- lapply(
+results_list <- pbmclapply(
   X = seq_along(condition_matrix$condition_num),
   FUN = function(condition) {
-    
-    cat("\nWorking on condition: ", condition)
     
     set.seed(seed_list[condition])
     
@@ -176,7 +172,7 @@ results_list <- lapply(
       )
     )
     
-  }
+  }, 
+  mc.preschedule = FALSE, 
+  mc.cores = 8
 )
-
-toc() # End timing; how much time elapsed?
