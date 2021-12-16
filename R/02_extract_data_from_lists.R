@@ -205,7 +205,7 @@ results_matrix <- map_dfr(
           d1 = d_values$d1,
           d2 = d_values$d2,
           d3 = d_values$d3,
-          warning = map_dbl(rep_results, .f = function(x) {
+          warning = map_chr(rep_results, .f = function(x) {
             warning <- pluck(x, "warning")
             if (is.null(warning)) { 
               warning <- NA 
@@ -214,7 +214,7 @@ results_matrix <- map_dfr(
             }
             warning
           }),
-          error = map_dbl(rep_results, .f = function(x) {
+          error = map_chr(rep_results, .f = function(x) {
             error <- pluck(x, "error")
             if (is.null(error)) {
               error <- NA
@@ -233,5 +233,3 @@ results_matrix <- map_dfr(
     )
   }, results_files = results_files, condition_matrix = condition_matrix
 )
-
-
