@@ -21,7 +21,7 @@ condition_matrix <- tidyr::expand_grid(
   factors = c(1, 3, 5, 10),
   items_per_factor = c(5, 15),
   factor_cor = c(0, .3, .6),
-  loading = c("weak", "moderate", "strong", "sequential"),
+  loading = c("weak", "moderate", "strong"),
   target_rmsea = c(0.025, 0.065, 0.090)
 ) %>% filter(
   !(factors == 1 & factor_cor != 0)
@@ -75,24 +75,16 @@ results_list <- pbmclapply(
     target_rmsea <- condition_matrix$target_rmsea[condition]
     target_cfi <- condition_matrix$target_cfi[condition]
     
-    # Set factor loading range given the loading condition
-    if (loading == "sequential") {
-      FacLoadDist <- "sequential"
-    } else {
-      FacLoadDist <- "fixed"
-    }
-    
     FacLoadRange <- switch(loading,
                            "weak" = 0.4,
                            "moderate" = 0.6,
-                           "strong" = 0.8,
-                           "sequential" = c(0.4, 0.8))
+                           "strong" = 0.8)
     
     # Generate factor model
     mod <- simFA(Model = list(NFac = factors,
                               NItemPerFac = items_per_factor,
                               Model = "oblique"),
-                 Loadings = list(FacLoadDist = FacLoadDist,
+                 Loadings = list(FacLoadDist = "fixed",
                                  FacLoadRange = FacLoadRange),
                  Phi = list(PhiType = "fixed",
                             MaxAbsPhi = factor_cor))
@@ -121,8 +113,8 @@ results_list <- pbmclapply(
           noisemaker(
             mod,
             method = "TKL",
-            target_rmsea = target_rmsea,
-            target_cfi = NULL,
+            target_rmsea = NULL,
+            target_cfi = target_cfi,
             tkl_ctrl = list(WmaxLoading = .3,
                             NWmaxLoading = 2,
                             max_tries = 100,
@@ -144,15 +136,15 @@ results_list <- pbmclapply(
         )
         
         # Other methods
-        sigma_cb  <- myTryCatch(quiet_noisemaker(mod, method = "CB", 
-                                                 target_rmsea = target_rmsea))
+        sigma_cb  <- myTryCatch(noisemaker(mod, method = "CB", 
+                                           target_rmsea = target_rmsea))
         sigma_wb  <- myTryCatch(noisemaker(mod, method = "WB", 
                                            target_rmsea = target_rmsea, 
                                            wb_mod = wb_mod))
         
         list(sigma_tkl_rmsea = sigma_tkl_rmsea,
              sigma_tkl_cfi = sigma_tkl_cfi,
-             sigma_tkl_rmsea = sigma_tkl_rmsea_cfi,
+             sigma_tkl_rmsea_cfi = sigma_tkl_rmsea_cfi,
              sigma_cb  = sigma_cb,
              sigma_wb  = sigma_wb)
       }, 
@@ -174,5 +166,5 @@ results_list <- pbmclapply(
     
   }, 
   mc.preschedule = FALSE, 
-  mc.cores = 8
+  mc.cores = 18
 )
