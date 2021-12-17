@@ -4,3 +4,4 @@
 .Ruserdata
 data/*.RDS
 *.err
+doc/
