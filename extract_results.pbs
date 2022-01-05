@@ -1,7 +1,7 @@
 #PBS -S /bin/bash
 #PBS -q batch
 #PBS -l nodes=1:ppn=20
-#PBS -l mem=24gb
+#PBS -l mem=16gb
 #PBS -l walltime=96:00:00
 #PBS -N simulation_main
 #PBS -e simulation_main.err
@@ -11,4 +11,4 @@
 cd $PBS_O_WORKDIR
 module load R/4.1.1
 module load gcc/11.2.0
-Rscript --vanilla R/01_generate_data.R
+Rscript --vanilla R/02_extract_data_from_lists.R

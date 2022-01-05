@@ -36,6 +36,8 @@ condition_matrix <- condition_matrix %>% mutate(
                          target_rmsea == 0.090 ~ 0.90)
 )
 
+saveRDS(condition_matrix, here("data", "condition_matrix.RDS"))
+
 # Make matrix of optimization method choices for TKL
 method_matrix <- tidyr::expand_grid(
   rmsea_weight = c(0,1),
@@ -64,6 +66,7 @@ seed_list <- sample(1e7, size = nrow(condition_matrix), replace = FALSE)
 
 results_list <- pbmclapply(
   X = seq_along(condition_matrix$condition_num),
+  # X = 154:nrow(condition_matrix),
   FUN = function(condition) {
     
     set.seed(seed_list[condition])
@@ -136,8 +139,15 @@ results_list <- pbmclapply(
         )
         
         # Other methods
-        sigma_cb  <- myTryCatch(noisemaker(mod, method = "CB", 
-                                           target_rmsea = target_rmsea))
+        # Skip CB for the largest conditions; takes way too long.
+        if (condition %in% 154:nrow(condition_matrix)) {
+          sigma_cb <- list("value" = NA,
+                           "warning" = NULL,
+                           "error" = NULL)
+        } else {
+          sigma_cb  <- myTryCatch(noisemaker(mod, method = "CB",
+                                             target_rmsea = target_rmsea))
+        }
         sigma_wb  <- myTryCatch(noisemaker(mod, method = "WB", 
                                            target_rmsea = target_rmsea, 
                                            wb_mod = wb_mod))
