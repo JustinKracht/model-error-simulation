@@ -3,10 +3,13 @@
 library(dplyr)
 library(tidyr)
 library(purrr)
+library(parallel)
+library(stringr)
 library(fungible)
+library(here)
 library(purrrgress)
 
-condition_matrix <- readRDS("data/condition_matrix.RDS")
+condition_matrix <- readRDS(here("data", "condition_matrix.RDS"))
 
 # Create results matrix ---------------------------------------------------
 
@@ -30,6 +33,17 @@ results <- expand_grid(
 # loop
 
 compute_fit_stats <- function(error_method_results, Rpop, k) {
+  
+  # Check if value is NULL; if so, return empty list
+  if (is.null(error_method_results$value)) {
+    out = data.frame(RMSEA_thetahat = NA,
+                     CFI_thetahat = NA,
+                     CRMR_theta = NA,
+                     CRMR_thetahat = NA,
+                     TLI_theta = NA,
+                     TLI_thetahat = NA)
+    return(out)
+  }
   
   RpopME <- pluck(error_method_results, "value", "Sigma")
   
@@ -90,6 +104,14 @@ compute_fit_stats <- function(error_method_results, Rpop, k) {
 
 # Compute d values
 compute_d_values <- function(error_method_data, target_rmsea, target_cfi) {
+  
+  if (is.null(error_method_data$value)) {
+    out = data.frame(d1 = NA,
+                     d2 = NA,
+                     d3 = NA)
+    return(out)
+  }
+  
   rmsea <- pluck(error_method_data, "value", "rmsea")
   cfi <- pluck(error_method_data, "value", "cfi")
   
@@ -125,9 +147,9 @@ results_files <- list.files(
 
 # Calculate alternative fit statistics
 
-results_matrix <- map_dfr(
-  .x = seq_along(results_files), 
-  .f = function(i, results_files, condition_matrix) {
+pbmcapply::pbmclapply(
+  X = seq_along(results_files), 
+  FUN = function(i, results_files, condition_matrix) {
     
     cat("/nWorking on condition:", i)
     
@@ -151,25 +173,21 @@ results_matrix <- map_dfr(
     
     # Create factor loading matrix
     loadings <- switch(loading_condition,
-                       "weak" = rep(.4, p * k),
-                       "moderate" = rep(.6, p * k),
-                       "strong" = rep(.8, p * k),
-                       "sequential" = seq(from = .4, to = .8, 
-                                          length.out = p * k))
+                       "weak" = .4,
+                       "moderate" = .6,
+                       "strong" = .8)
     
-    L <- Matrix::bdiag(
-      map(.x = 1:k, .f = function(x, p, k) {
-        matrix(rep(1, times = p/k), ncol = 1)
-      }, p = p, k = k)
-    ) %>% as.matrix()
+    # Extract Rpop
+    mod <- fungible::simFA(Model = list(NFac = condition_matrix$factors[j],
+                                        NItemPerFac = condition_matrix$items_per_factor[j],
+                                        Model = "oblique"),
+                           Loadings = list(FacLoadDist = "fixed",
+                                           FacLoadRange = loadings),
+                           Phi = list(PhiType = "fixed",
+                                      MaxAbsPhi = condition_matrix$factor_cor[j]))
+    Rpop <- mod$Rpop
     
-    L <- L * loadings
-    
-    # Compute Rpop
-    Rpop <- tcrossprod(L)
-    diag(Rpop) <- 1
-    
-    purrrgress::pro_map_dfr(
+    condition_results_matrix <- purrr::map_dfr(
       .x = seq_along(condition_results),
       .f = function(z, Rpop, p, k, target_rmsea, target_cfi,
                     condition_num) {
@@ -183,24 +201,24 @@ results_matrix <- map_dfr(
                                                target_cfi = target_cfi))
         
         out <- data.frame(
-          condition_num = condition_num,
-          rep_num = z,
-          cfi = map_dbl(rep_results, ~ pluck(., "value", "cfi")),
+          condition_num = rep(condition_num, 5),
+          rep_num = rep(z, 5),
+          cfi = map_dbl(rep_results, ~ pluck(., "value", "cfi", .default = NA)),
           cfi_thetahat = other_fit_stats$CFI_thetahat,
-          rmsea = map_dbl(rep_results, ~ pluck(., "value", "rmsea")),
+          rmsea = map_dbl(rep_results, ~ pluck(., "value", "rmsea", .default = NA)),
           rmsea_thetahat = other_fit_stats$RMSEA_thetahat,
           crmr = other_fit_stats$CRMR_theta,
           crmr_thetahat = other_fit_stats$CRMR_thetahat,
           tli = other_fit_stats$TLI_theta,
           tli_thetahat = other_fit_stats$TLI_thetahat,
-          m = map_dbl(rep_results, ~ pluck(., "value", "m")),
-          v = map_dbl(rep_results, ~ pluck(., "value", "v")),
-          eps = map_dbl(rep_results, ~ pluck(., "value", "eps")),
-          fn_value = map_dbl(rep_results, ~ pluck(., "value", "fn_value")),
+          m = map_dbl(rep_results, ~ pluck(., "value", "m", .default = NA)),
+          v = map_dbl(rep_results, ~ pluck(., "value", "v", .default = NA)),
+          eps = map_dbl(rep_results, ~ pluck(., "value", "eps", .default = NA)),
+          fn_value = map_dbl(rep_results, ~ pluck(., "value", "fn_value", .default = NA)),
           error_method = c("tkl_rmsea", "tkl_cfi", "tkl_rmsea_cfi", "cb", "wb"),
           w_has_major_factors = map_lgl(rep_results, 
                                         ~ check_w_major_factors(
-                                          pluck(., "value", "W")
+                                          pluck(., "value", "W", .default = NA)
                                         )),
           d1 = d_values$d1,
           d2 = d_values$d2,
@@ -231,5 +249,12 @@ results_matrix <- map_dfr(
       Rpop = Rpop, p = p, k = k, target_rmsea = target_rmsea, 
       target_cfi = target_cfi, condition_num
     )
-  }, results_files = results_files, condition_matrix = condition_matrix
+    
+    saveRDS(condition_results_matrix, 
+            file = paste0("data/results_matrix_", 
+                          formatC(i, width = 3, flag = 0), 
+                          ".RDS"))
+    
+  }, results_files = results_files, condition_matrix = condition_matrix, 
+  mc.cores = 8
 )
