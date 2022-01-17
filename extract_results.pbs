@@ -3,8 +3,8 @@
 #PBS -l nodes=1:ppn=20
 #PBS -l mem=16gb
 #PBS -l walltime=96:00:00
-#PBS -N simulation_main
-#PBS -e simulation_main.err
+#PBS -N extract_data_from_lists
+#PBS -e extract_data_from_lists.err
 #PBS -m abe
 #PBS -M krach018@umn.edu
 
